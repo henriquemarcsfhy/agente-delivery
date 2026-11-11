@@ -116,9 +116,15 @@ Todos os modelos rodaram no plano gratuito do Groq, com temperatura 0.
 | v0.1 | `openai/gpt-oss-20b` | 1 | 77% (10/13) | 0 | 3 (bugs 1 e 2) | 15.5k | 69 s |
 | v0.1 | `openai/gpt-oss-120b` | 1 | 92% (12/13) | 0 | 1 (bug 3) | 16.1k | 59 s |
 | v0.1 | `qwen/qwen3.8-27b` | 1 | 92% (12/13) | 0 | 1 (limite diário de tokens) | 17.7k | 147 s |
-| v0.2 | _a preencher_ | | | | | | |
+| v0.2 | `openai/gpt-oss-120b` | 1 (parcial) | **100% (11/11 concluídos)** | 0 | 2 (limite diário de tokens) | 10.7k* | 36 s* |
+| v0.2 | `openai/gpt-oss-20b` | 1 (parcial) | **100% (5/5 concluídos)** | 0 | 8 (limite diário de tokens) | 8.8k* | 30 s* |
+| v0.2 | `qwen/qwen3.8-27b` | _pendente_ | | | | | |
 
-> Na v0.2 os cenários ficaram **mais rígidos** (ver bug 4), então os números da v0.2 não são diretamente comparáveis aos da v0.1: são mais conservadores.
+> Na v0.2 os cenários ficaram **mais rígidos** (ver bug 4), então os números não são diretamente comparáveis aos da v0.1: são mais conservadores.
+>
+> **A rodada v0.2 está incompleta.** Os cenários que pararam no limite diário do plano gratuito não contam nem como acerto nem como falha. Para rodar só esses: `python evals/run_evals.py ... --retomar evals/resultados/<arquivo>.json`. \*Medianas só dos cenários concluídos, que não são os mesmos da v0.1; servem como indicação, não como comparação exata.
+>
+> Destaques da v0.2: com o gpt-oss-120b, os cenários de restaurante fechado, fora da área e cupom expirado, que na v0.1 falhavam ou levavam o agente a informar errado o cliente, passaram mesmo com as checagens mais rígidas. Com o gpt-oss-20b, o cenário de alergia, que na v0.1 quebrava por tool call rejeitada, passou. Nenhuma tool call foi rejeitada pelo provedor nas rodadas v0.2.
 
 Os detalhes de cada rodada (tool calls, argumentos e resposta final) ficam em [`evals/resultados/`](evals/resultados/).
 

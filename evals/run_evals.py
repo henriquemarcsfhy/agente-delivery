@@ -32,11 +32,21 @@ def main() -> None:
     p.add_argument("--repeticoes", type=int, default=1, help="Rodadas por cenário (mede consistência)")
     p.add_argument("--temperatura", type=float, default=0.0)
     p.add_argument("--filtro", help="Roda só cenários cujo id contém este texto")
+    p.add_argument(
+        "--retomar",
+        metavar="RESULTADO.json",
+        help="Roda só os cenários que pararam por erro de infraestrutura (ex.: limite diário) num resultado anterior",
+    )
     a = p.parse_args()
 
     cenarios = json.loads((AQUI / "cenarios.json").read_text("utf-8"))
     if a.filtro:
         cenarios = [c for c in cenarios if a.filtro in c["id"]]
+    if a.retomar:
+        anterior = json.loads(Path(a.retomar).read_text("utf-8"))["resultados"]
+        pendentes = {r["id"] for r in anterior if r.get("erro_infra")}
+        cenarios = [c for c in cenarios if c["id"] in pendentes]
+        print(f"Retomando {len(cenarios)} cenário(s) que pararam por infraestrutura: {sorted(pendentes)}\n")
     llm = OpenAICompatibleClient(model=a.model, base_url=a.base_url, temperature=a.temperatura)
     catalogo = Catalogo.carregar()
 

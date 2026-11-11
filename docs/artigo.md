@@ -99,7 +99,7 @@ Um efeito positivo também apareceu: quando o qwen chamou `ver_cardapio("cantina
 
 Todos os casos viraram testes de regressão. Nenhum teste escrito "de cabeça" teria pegado algum deles: só apareceram quando modelos reais conversaram com o sistema.
 
-> **Depois das correções (v0.2):** _[resultados da nova rodada]_
+**Depois das correções (v0.2)**, com os cenários mais rígidos: o gpt-oss-120b passou em **11 de 11** cenários concluídos, inclusive os de restaurante fechado, fora da área e cupom expirado, que antes falhavam ou enganavam o cliente. O gpt-oss-20b passou em **5 de 5**, inclusive o de alergia, que antes quebrava. Nenhuma tool call foi rejeitada pelo provedor. Os demais cenários pararam no limite diário de tokens do plano gratuito, e por isso não entram na conta, nem como acerto nem como falha. Ainda falta completar essa rodada, e prefiro publicar "11 de 11 concluídos" a arredondar para "100%".
 
 ## 6. Sem framework, de propósito
 

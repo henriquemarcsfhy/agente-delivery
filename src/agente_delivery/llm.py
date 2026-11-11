@@ -53,6 +53,15 @@ class LLMResponse:
         return msg
 
 
+class ToolCallRejectedError(Exception):
+    """O provedor recusou a tool call gerada pelo modelo antes de devolvê-la.
+
+    Alguns provedores (ex.: Groq) validam nome e argumentos da tool call no servidor e,
+    se o modelo gerar algo inválido, respondem HTTP 400 em vez de devolver a chamada.
+    O agente trata isso como erro recuperável: avisa o modelo e tenta de novo.
+    """
+
+
 class LLMClient(Protocol):
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse: ...
 
@@ -81,13 +90,21 @@ class OpenAICompatibleClient:
         )
 
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=self.temperature,
-        )
+        from openai import BadRequestError
+
+        try:
+            resp = self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=self.temperature,
+            )
+        except BadRequestError as e:
+            texto_erro = str(e).lower()
+            if "tool call validation failed" in texto_erro or "tool_use_failed" in texto_erro:
+                raise ToolCallRejectedError(str(e)) from e
+            raise
         msg = resp.choices[0].message
         calls = [ToolCall.from_raw(c.id, c.function.name, c.function.arguments) for c in (msg.tool_calls or [])]
         usage = {}
@@ -96,7 +113,7 @@ class OpenAICompatibleClient:
         return LLMResponse(content=msg.content, tool_calls=calls, usage=usage)
 
 
-Passo = LLMResponse | Callable[[list[dict[str, Any]]], LLMResponse]
+Passo = LLMResponse | Exception | Callable[[list[dict[str, Any]]], LLMResponse]
 
 
 class ScriptedLLM:
@@ -111,6 +128,8 @@ class ScriptedLLM:
         if not self._roteiro:
             raise RuntimeError("ScriptedLLM: roteiro esgotado")
         passo = self._roteiro.pop(0)
+        if isinstance(passo, Exception):
+            raise passo
         return passo(messages) if callable(passo) else passo
 
 

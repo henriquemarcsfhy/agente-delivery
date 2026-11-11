@@ -25,6 +25,32 @@ FORMAS_PAGAMENTO = ("pix", "cartao", "dinheiro")
 FERRAMENTAS_SENSIVEIS = frozenset({"finalizar_pedido"})
 
 
+# Sinônimos comuns que clientes usam no lugar da culinária cadastrada.
+_SINONIMOS = {
+    "sushi": "japonesa",
+    "japones": "japonesa",
+    "pizza": "italiana",
+    "massa": "italiana",
+    "burger": "hamburguer",
+    "lanche": "hamburguer",
+    "vegano": "vegana",
+    "vegetariana": "vegana",
+}
+_IGNORAR = {"comida", "restaurante", "restaurantes", "delivery", "de", "do", "da"}
+
+
+def _termos_de_busca(busca: str | None) -> set[str]:
+    if not busca:
+        return set()
+    termos = {t for t in normalizar(busca).replace("-", " ").split() if t not in _IGNORAR and len(t) >= 3}
+    termos |= {_SINONIMOS[t] for t in termos if t in _SINONIMOS}
+    return termos
+
+
+def _texto_pesquisavel(r: Restaurante) -> str:
+    return normalizar(" ".join([r.culinaria, r.nome, *(i.nome for i in r.itens)]))
+
+
 class ToolError(Exception):
     """Erro de regra de negócio. A mensagem volta para o modelo como observação."""
 
@@ -65,9 +91,12 @@ def _fn(nome: str, descricao: str, propriedades: dict, obrigatorios: list[str] |
 TOOL_SCHEMAS: list[dict] = [
     _fn(
         "buscar_restaurantes",
-        "Lista restaurantes, com filtros opcionais por culinária, bairro de entrega e se estão abertos agora.",
+        "Lista restaurantes, com filtros opcionais por termo de busca, bairro de entrega e se estão abertos agora.",
         {
-            "culinaria": {"type": "string", "description": "Ex.: italiana, japonesa, hamburguer, vegana."},
+            "busca": {
+                "type": "string",
+                "description": "Culinária, prato ou nome do restaurante. Ex.: japonesa, sushi, pizza, Brasa Burger.",
+            },
             "bairro": {"type": "string", "description": "Bairro de entrega do cliente."},
             "apenas_abertos": {"type": "boolean", "description": "Padrão: true."},
         },
@@ -169,17 +198,20 @@ class DeliveryTools:
     # ---------- consulta ----------
 
     def buscar_restaurantes(
-        self, culinaria: str | None = None, bairro: str | None = None, apenas_abertos: bool = True
+        self, busca: str | None = None, bairro: str | None = None, apenas_abertos: bool = True
     ) -> dict[str, Any]:
         bairro = bairro or self.estado.bairro
+        termos = _termos_de_busca(busca)
         resultados = []
+        fechados_que_combinam = []
         for r in self.catalogo.restaurantes.values():
-            if culinaria and normalizar(culinaria) not in r.culinaria:
+            if termos and not any(t in _texto_pesquisavel(r) for t in termos):
                 continue
             if bairro and not r.entrega_em(bairro):
                 continue
             aberto = r.aberto_em(self.estado.agora)
             if apenas_abertos and not aberto:
+                fechados_que_combinam.append(f"{r.nome} (abre {r.abre:%H:%M})")
                 continue
             resultados.append(
                 {
@@ -192,7 +224,15 @@ class DeliveryTools:
                     "frete": formatar_reais(r.frete_centavos_por_bairro[normalizar(bairro)]) if bairro else None,
                 }
             )
-        return {"restaurantes": resultados, "total": len(resultados)}
+        resposta: dict[str, Any] = {"restaurantes": resultados, "total": len(resultados)}
+        if not resultados:
+            # Resultado vazio sem contexto faz o modelo desistir; diga o que existe.
+            resposta["dica"] = {
+                "fechados_agora_que_combinam": fechados_que_combinam,
+                "culinarias_disponiveis": sorted({r.culinaria for r in self.catalogo.restaurantes.values()}),
+                "restaurantes_existentes": sorted(r.nome for r in self.catalogo.restaurantes.values()),
+            }
+        return resposta
 
     def ver_cardapio(self, restaurante_id: str) -> dict[str, Any]:
         r = self._restaurante(restaurante_id)

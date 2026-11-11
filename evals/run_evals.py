@@ -58,6 +58,9 @@ def main() -> None:
     print(
         f"- Chamadas de ferramenta por cenário (mediana): {statistics.median(r['chamadas_ferramenta'] for r in resultados)}"
     )
+    print(
+        f"- Tool calls rejeitadas pelo provedor (total, recuperadas com retry): {sum(r['rejeicoes_provedor'] for r in resultados)}"
+    )
     print(f"- Tokens por cenário (mediana): {statistics.median(r['tokens'] for r in resultados)}")
     print(f"- Latência por cenário (mediana): {statistics.median(r['latencia_s'] for r in resultados):.1f}s\n")
 

@@ -1,7 +1,7 @@
 import json
 
 from agente_delivery.agent import MENSAGEM_LIMITE_PASSOS, Agent
-from agente_delivery.llm import LLMResponse, ScriptedLLM, ToolCall, chamada, texto
+from agente_delivery.llm import LLMResponse, ScriptedLLM, ToolCall, ToolCallRejectedError, chamada, texto
 
 
 def _agente(tools, roteiro, confirma=True, **kw):
@@ -127,3 +127,23 @@ def test_trace_registra_eventos(tools, tmp_path):
     arq = tmp_path / "trace.jsonl"
     agente.salvar_trace(str(arq))
     assert len(arq.read_text().splitlines()) == len(agente.trace)
+
+
+def test_rejeicao_do_provedor_e_recuperada(tools):
+    # Caso real (Groq + gpt-oss-20b): nome de ferramenta com token interno vazado -> HTTP 400.
+    rejeicao = ToolCallRejectedError("tool call validation failed: attempted to call tool 'ver_carrinho<|channel|>'")
+    agente, llm, _ = _agente(tools, [rejeicao, chamada("ver_carrinho"), texto("Seu carrinho está vazio.")])
+    r = agente.enviar("o que tem no carrinho?")
+    assert r.texto == "Seu carrinho está vazio." and not r.atingiu_limite
+    assert agente.rejeicoes_provedor == 1
+    # O aviso de correção vai na nova tentativa, mas não fica no histórico.
+    assert "rejeitada" in llm.chamadas[1][-1]["content"]
+    assert not any("rejeitada" in (m.get("content") or "") for m in agente.mensagens)
+
+
+def test_rejeicoes_persistentes_viram_fallback_e_nao_excecao(tools):
+    erro = ToolCallRejectedError("tool call validation failed")
+    agente, _, _ = _agente(tools, [erro, erro, erro], max_rejeicoes_por_passo=2)
+    r = agente.enviar("...")
+    assert r.atingiu_limite and r.texto == MENSAGEM_LIMITE_PASSOS
+    assert agente.rejeicoes_provedor == 3

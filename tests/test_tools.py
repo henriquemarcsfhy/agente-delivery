@@ -18,8 +18,31 @@ def test_normalizar_remove_acentos_e_espacos():
 
 
 def test_buscar_filtra_por_culinaria_e_bairro(tools):
-    r = tools.buscar_restaurantes(culinaria="Japonesa", bairro="Moema")
+    r = tools.buscar_restaurantes(busca="Japonesa", bairro="Moema")
     assert [x["restaurante_id"] for x in r["restaurantes"]] == ["sushi-kaze"]
+
+
+@pytest.mark.parametrize(
+    ("busca", "esperado"),
+    [
+        ("sushi", "sushi-kaze"),  # bug real encontrado na avaliação com gpt-oss-20b
+        ("comida japonesa", "sushi-kaze"),
+        ("pizza", "cantina-nonna"),
+        ("Brasa Burger", "brasa-burger"),
+        ("tiramisù", "cantina-nonna"),  # nome de prato
+    ],
+)
+def test_buscar_por_sinonimo_nome_ou_prato(tools, busca, esperado):
+    ids = [x["restaurante_id"] for x in tools.buscar_restaurantes(busca=busca)["restaurantes"]]
+    assert esperado in ids
+
+
+def test_busca_vazia_explica_o_que_existe(tools):
+    tools.estado.agora = datetime(2026, 11, 11, 9, 0, tzinfo=FUSO)
+    r = tools.buscar_restaurantes(busca="pizza")
+    assert r["total"] == 0
+    assert r["dica"]["fechados_agora_que_combinam"] == ["Cantina da Nonna (abre 18:00)"]
+    assert "japonesa" in r["dica"]["culinarias_disponiveis"]
 
 
 def test_buscar_respeita_horario(tools):

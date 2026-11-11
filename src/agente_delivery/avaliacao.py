@@ -27,6 +27,7 @@ class ResultadoCenario:
     passos: int
     chamadas_ferramenta: int
     erros_ferramenta: int
+    rejeicoes_provedor: int
     tokens: int
     latencia_s: float
     resposta_final: str
@@ -117,6 +118,7 @@ def rodar_cenario(cenario: dict[str, Any], llm: LLMClient, catalogo: Catalogo, m
         passos=passos,
         chamadas_ferramenta=len(chamadas),
         erros_ferramenta=sum(1 for c in chamadas if isinstance(c["resultado"], dict) and "erro" in c["resultado"]),
+        rejeicoes_provedor=agente.rejeicoes_provedor,
         tokens=sum(agente.uso_tokens.values()),
         latencia_s=round(latencia, 2),
         resposta_final=texto_final,

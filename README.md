@@ -61,11 +61,15 @@ git clone https://github.com/henriquemarcsfhy/agente-delivery && cd agente-deliv
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest -q                     # 55 testes, sem LLM
+pytest -q                     # 63 testes, sem LLM
 
 # Chat com OpenAI
 export LLM_API_KEY=sk-...
 agente-delivery --model gpt-4o-mini --debug
+
+# Chat com Groq (plano gratuito, sem cartão)
+export LLM_API_KEY=gsk_...
+agente-delivery --base-url https://api.groq.com/openai/v1 --model openai/gpt-oss-20b --debug
 
 # Chat 100% local com Ollama
 ollama pull qwen2.5:7b
@@ -94,6 +98,7 @@ Avaliar agente comparando o texto gerado é frágil. Aqui, cada cenário em [`ev
 São 13 cenários em 7 categorias: fluxo feliz, grounding (sem alucinar preço), segurança alimentar, prompt injection, human-in-the-loop, regras de negócio e estado de conversa multi-turno.
 
 ```bash
+python evals/run_evals.py --base-url https://api.groq.com/openai/v1 --model openai/gpt-oss-20b --repeticoes 3
 python evals/run_evals.py --model gpt-4o-mini --repeticoes 3
 python evals/run_evals.py --base-url http://localhost:11434/v1 --model qwen2.5:7b --repeticoes 3
 ```
@@ -106,9 +111,21 @@ O próprio harness também é testado ([`tests/test_avaliacao.py`](tests/test_av
 
 <!-- Rode os comandos acima e cole aqui a tabela que o runner imprime. -->
 
-| Modelo | Sucesso geral | Prompt injection | Segurança alimentar | Regras de negócio | Tokens/cenário |
-|---|---|---|---|---|---|
-| _a preencher_ | | | | | |
+| Versão | Modelo (Groq) | Rodadas | Sucesso geral | Prompt injection | Segurança alimentar | Regras de negócio | Tokens/cenário (mediana) |
+|---|---|---|---|---|---|---|---|
+| v0.1 | `openai/gpt-oss-20b` | 1 | 77% (10/13) | 1/1 | 0/1 | 3/4 | 15.5k |
+| v0.2 | _a preencher_ | | | | | | |
+
+Os detalhes de cada rodada (tool calls, argumentos e resposta final) ficam em [`evals/resultados/`](evals/resultados/).
+
+### O que a avaliação encontrou (v0.1 → v0.2)
+
+A primeira rodada com um modelo real falhou em 3 dos 13 cenários. Nenhuma falha era o modelo "não sabendo" a tarefa: eram problemas do **sistema em volta do modelo**.
+
+1. **Ferramenta de busca frágil.** O cliente pediu "Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas a culinária cadastrada é "japonesa". A busca voltou vazia, e o modelo concluiu que não havia sushi no bairro. **Correção:** a busca agora aceita culinária, prato, nome do restaurante e sinônimos, e um resultado vazio traz uma `dica` com o que existe (culinárias, restaurantes e quem está fechado agora). Lição: resultado vazio sem contexto leva o modelo a desistir.
+2. **Tool call rejeitada pelo provedor.** O gpt-oss-20b às vezes gera uma tool call malformada: vaza um token interno no nome (`buscar_restaurantes<|channel|>commentary`) ou inventa argumentos para `ver_carrinho`. O Groq valida isso no servidor e responde **HTTP 400**, sem devolver a chamada, e o agente quebrava. **Correção:** o cliente converte esse 400 em `ToolCallRejectedError`, e o loop reenvia a requisição com um aviso de correção transitório (que não entra no histórico), até 2 vezes por passo. Se mesmo assim falhar, responde com uma mensagem de fallback em vez de lançar exceção. O runner agora conta essas rejeições.
+
+Os dois casos viraram testes de regressão ([`test_tools.py`](tests/test_tools.py), [`test_agent.py`](tests/test_agent.py)).
 
 ## Decisões e trade-offs
 
@@ -136,7 +153,7 @@ src/agente_delivery/
   prompts.py      # system prompt
   chat.py         # CLI
 evals/            # cenários e runner
-tests/            # 55 testes (pytest)
+tests/            # 63 testes (pytest)
 docs/artigo.md    # artigo técnico sobre o projeto
 ```
 

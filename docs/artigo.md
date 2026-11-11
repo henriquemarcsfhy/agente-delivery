@@ -81,16 +81,26 @@ São 13 cenários em 7 categorias (fluxo feliz, grounding, segurança alimentar,
 
 Também testei o **próprio harness**: um agente roteirizado que obedece à injeção ou ignora a alergia precisa *falhar*. Uma avaliação que nunca reprova nada não está medindo nada.
 
-> **Resultados:** _[cole aqui a tabela do `run_evals.py` com os modelos que você testou e comente o que observou: quais categorias cada modelo errou e por quê]_
+## 5. A primeira avaliação real encontrou dois bugs, e nenhum era "do modelo"
 
-## 5. Sem framework, de propósito
+Rodei os 13 cenários com o `openai/gpt-oss-20b` no plano gratuito do Groq. Resultado: **77% (10/13)**. As 3 falhas foram mais interessantes que os acertos.
+
+**Bug 1: uma ferramenta que faz o modelo desistir.** O cliente pediu "um Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas no catálogo a culinária era "japonesa". A busca voltou vazia, e o modelo respondeu, com toda a educação, que não havia sushi aberto no bairro. O modelo não errou: a ferramenta é que era frágil. Na correção, a busca passou a aceitar culinária, prato, nome do restaurante e sinônimos. E, mais importante, **um resultado vazio agora explica o que existe**: culinárias disponíveis, restaurantes e quem está fechado agora. Um `[]` sem contexto é um beco sem saída para um LLM.
+
+**Bug 2: o provedor rejeita a tool call antes de você vê-la.** Em dois cenários, o modelo gerou chamadas malformadas: vazou um token interno do formato de chat no nome da ferramenta (`buscar_restaurantes<|channel|>commentary`) ou passou o conteúdo do carrinho como argumento de `ver_carrinho`. O Groq valida tool calls no servidor e respondeu **HTTP 400**, sem devolver a chamada. Meu loop tratava erros de argumento que *chegavam*, mas não esse caso, e o agente quebrava. Na correção, o cliente converte esse 400 num erro específico, e o loop reenvia a requisição com um aviso de correção que **não entra no histórico**, até 2 vezes por passo. Se mesmo assim falhar, o agente responde com um fallback em vez de lançar exceção.
+
+Os dois casos viraram testes de regressão. Nenhum teste unitário escrito "de cabeça" teria pegado nenhum dos dois: só apareceram quando um modelo real conversou com o sistema.
+
+> **Depois das correções (v0.2):** _[resultados da nova rodada com gpt-oss-20b, gpt-oss-120b e qwen3.8-27b]_
+
+## 6. Sem framework, de propósito
 
 O loop do agente tem cerca de 100 linhas: chama o modelo, executa as tool calls, devolve as observações e repete até haver uma resposta em texto ou estourar o limite de passos. Frameworks como LangGraph são ótimos em produção, mas escrever o loop na mão deixou claros alguns detalhes que costumam ficar escondidos:
 
 - **Limite de passos** por turno, com uma mensagem de fallback adicionada ao histórico para a conversa continuar válida.
 - **JSON malformado** nos argumentos é comum em modelos menores. O parse tolerante devolve o erro como observação, e o modelo geralmente se corrige no passo seguinte.
 - **Validação de schema antes da execução** (tipos, enums, `additionalProperties: false`). Em Python, `True` passa num `isinstance(x, int)`; um bug desses vira um pedido de "True pizzas".
-- **Testes sem LLM:** um `ScriptedLLM` reproduz sequências de tool calls, e o CI roda 55 testes em menos de um segundo, sem chave de API.
+- **Testes sem LLM:** um `ScriptedLLM` reproduz sequências de tool calls, e o CI roda 63 testes em menos de um segundo, sem chave de API.
 
 O cliente usa o protocolo de Chat Completions da OpenAI, então o mesmo código roda com OpenAI, Ollama local, Groq ou vLLM. Basta trocar a `base_url`.
 
@@ -106,5 +116,6 @@ O cliente usa o protocolo de Chat Completions da OpenAI, então o mesmo código 
 2. Ações irreversíveis exigem validação e depois confirmação humana fora do LLM.
 3. Trate todo dado vindo de ferramenta como potencialmente hostil.
 4. Avalie estado final e chamadas de ferramenta, e teste o próprio avaliador.
+5. Rode a avaliação com um modelo real cedo: os bugs mais caros estão no sistema em volta do modelo.
 
 O código completo, os testes e os cenários de avaliação estão em [github.com/henriquemarcsfhy/agente-delivery](https://github.com/henriquemarcsfhy/agente-delivery).

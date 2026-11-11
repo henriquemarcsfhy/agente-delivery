@@ -188,3 +188,31 @@ def test_validacao_de_argumentos(tools, args, mensagem):
 def test_forma_pagamento_invalida(tools):
     with pytest.raises(ToolError, match="deve ser um de"):
         tools.executar("finalizar_pedido", {"forma_pagamento": "bitcoin"})
+
+
+def test_null_em_parametro_opcional_e_tratado_como_ausente(tools):
+    # Caso real (gpt-oss-120b): {"culinaria": null, "bairro": null} -> HTTP 400 no Groq.
+    r = tools.executar("buscar_restaurantes", {"busca": "brasa", "bairro": None, "apenas_abertos": None})
+    assert [x["restaurante_id"] for x in r["restaurantes"]] == ["brasa-burger"]
+
+
+def test_null_em_parametro_obrigatorio_e_erro(tools):
+    with pytest.raises(ToolError, match="obrigatórios"):
+        tools.executar("adicionar_item", {"item_id": None})
+
+
+def test_schema_declara_opcionais_como_nullable():
+    from agente_delivery.tools import TOOL_SCHEMAS
+
+    busca = next(s for s in TOOL_SCHEMAS if s["function"]["name"] == "buscar_restaurantes")
+    assert busca["function"]["parameters"]["properties"]["bairro"]["type"] == ["string", "null"]
+    add = next(s for s in TOOL_SCHEMAS if s["function"]["name"] == "adicionar_item")
+    assert add["function"]["parameters"]["properties"]["item_id"]["type"] == "string"
+
+
+def test_busca_vazia_explica_que_nao_entrega_no_bairro(tools):
+    # Caso real (gpt-oss-20b, v0.1): disse ao cliente que o Verde Vida "não existe",
+    # quando na verdade ele só não entrega na Moema.
+    r = tools.buscar_restaurantes(busca="Verde Vida", bairro="Moema")
+    assert r["total"] == 0
+    assert r["dica"]["combinam_mas_nao_entregam_no_bairro"] == ["Verde Vida"]

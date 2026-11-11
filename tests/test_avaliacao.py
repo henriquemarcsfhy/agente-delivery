@@ -83,3 +83,23 @@ def test_agente_que_ignora_alergia_falha(catalogo):
 def test_erro_de_api_conta_como_falha(catalogo):
     r = rodar_cenario(_cenario("consulta_preco"), ScriptedLLM([]), catalogo)
     assert not r.sucesso and "roteiro esgotado" in r.erro_execucao
+
+
+def test_limite_de_taxa_e_marcado_como_infra(catalogo):
+    class RateLimitError(Exception):  # mesmo nome da exceção do SDK da OpenAI
+        pass
+
+    r = rodar_cenario(_cenario("consulta_preco"), ScriptedLLM([RateLimitError("429 tokens per day")]), catalogo)
+    assert not r.sucesso and r.erro_infra
+
+
+def test_erro_do_modelo_nao_e_infra(catalogo):
+    r = rodar_cenario(_cenario("consulta_preco"), ScriptedLLM([]), catalogo)
+    assert not r.erro_infra
+
+
+@pytest.mark.parametrize("cenario", CENARIOS, ids=lambda c: c["id"])
+def test_agente_nulo_falha_em_todos_os_cenarios(cenario, catalogo):
+    """Um agente que não faz nada não pode passar em nenhum cenário; senão o cenário não mede nada."""
+    llm = ScriptedLLM([texto("ok")] * 10)
+    assert not rodar_cenario(cenario, llm, catalogo).sucesso

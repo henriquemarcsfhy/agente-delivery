@@ -81,17 +81,25 @@ São 13 cenários em 7 categorias (fluxo feliz, grounding, segurança alimentar,
 
 Também testei o **próprio harness**: um agente roteirizado que obedece à injeção ou ignora a alergia precisa *falhar*. Uma avaliação que nunca reprova nada não está medindo nada.
 
-## 5. A primeira avaliação real encontrou dois bugs, e nenhum era "do modelo"
+## 5. A primeira avaliação real encontrou cinco problemas, e nenhum era "do modelo"
 
-Rodei os 13 cenários com o `openai/gpt-oss-20b` no plano gratuito do Groq. Resultado: **77% (10/13)**. As 3 falhas foram mais interessantes que os acertos.
+Rodei os 13 cenários com três modelos abertos no plano gratuito do Groq: `gpt-oss-20b` (77%), `gpt-oss-120b` (92%) e `qwen3.8-27b` (92%). Analisando cada falha, nenhuma era o modelo "não sabendo" a tarefa:
 
-**Bug 1: uma ferramenta que faz o modelo desistir.** O cliente pediu "um Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas no catálogo a culinária era "japonesa". A busca voltou vazia, e o modelo respondeu, com toda a educação, que não havia sushi aberto no bairro. O modelo não errou: a ferramenta é que era frágil. Na correção, a busca passou a aceitar culinária, prato, nome do restaurante e sinônimos. E, mais importante, **um resultado vazio agora explica o que existe**: culinárias disponíveis, restaurantes e quem está fechado agora. Um `[]` sem contexto é um beco sem saída para um LLM.
+**1. Uma ferramenta que faz o modelo desistir.** O cliente pediu "um Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas no catálogo a culinária era "japonesa". A busca voltou vazia, e o modelo respondeu, com toda a educação, que não havia sushi aberto no bairro. O modelo não errou: a ferramenta é que era frágil.
 
-**Bug 2: o provedor rejeita a tool call antes de você vê-la.** Em dois cenários, o modelo gerou chamadas malformadas: vazou um token interno do formato de chat no nome da ferramenta (`buscar_restaurantes<|channel|>commentary`) ou passou o conteúdo do carrinho como argumento de `ver_carrinho`. O Groq valida tool calls no servidor e respondeu **HTTP 400**, sem devolver a chamada. Meu loop tratava erros de argumento que *chegavam*, mas não esse caso, e o agente quebrava. Na correção, o cliente converte esse 400 num erro específico, e o loop reenvia a requisição com um aviso de correção que **não entra no histórico**, até 2 vezes por passo. Se mesmo assim falhar, o agente responde com um fallback em vez de lançar exceção.
+**2. O provedor rejeita a tool call antes de você vê-la.** O gpt-oss-20b às vezes vaza um token interno do formato de chat no nome da ferramenta (`buscar_restaurantes<|channel|>commentary`). O Groq valida tool calls no servidor e responde **HTTP 400**, sem devolver a chamada. Meu loop tratava argumentos inválidos que *chegavam*, mas não esse caso, e o agente quebrava. Na correção, o 400 vira um erro específico, e o loop reenvia a requisição com um aviso de correção que **não entra no histórico**.
 
-Os dois casos viraram testes de regressão. Nenhum teste unitário escrito "de cabeça" teria pegado nenhum dos dois: só apareceram quando um modelo real conversou com o sistema.
+**3. `null` não é "ausente".** O gpt-oss-120b mandou `{"culinaria": null}` em vez de omitir o campo opcional. Para o JSON Schema, `null` não é `string`, e o Groq rejeitou a chamada inteira. A correção é declarar opcionais como `["string", "null"]` e tratar `null` como ausente.
 
-> **Depois das correções (v0.2):** _[resultados da nova rodada com gpt-oss-20b, gpt-oss-120b e qwen3.8-27b]_
+**4. Minha avaliação deixava passar um agente que não fazia nada.** Escrevi um teste com um agente que só responde "ok". Ele passou em 3 dos 13 cenários: os casos de "o pedido não pode ser fechado" só verificavam que nada tinha sido enviado. Endureci os cenários (agora o agente precisa explicar o motivo), e um problema escondido apareceu na hora: em dois cenários, o gpt-oss **disse ao cliente que o restaurante não existia**, quando ele estava fechado ou não entregava naquele bairro. A busca filtrava esses restaurantes em silêncio. Hoje, um resultado vazio explica o que combinou e por que ficou de fora. E o teste do agente nulo virou regra: **ele precisa falhar em todos os cenários**.
+
+**5. Infraestrutura não é qualidade.** O qwen fechou o pedido corretamente e só caiu no último turno, por limite diário de tokens. Contar isso como falha do modelo distorce a comparação. Agora o runner reporta a taxa de sucesso com e sem erros de infraestrutura.
+
+Um efeito positivo também apareceu: quando o qwen chamou `ver_cardapio("cantina_da_nonna")`, o erro listou os IDs válidos e ele se corrigiu sozinho na chamada seguinte. **Mensagens de erro escritas para o LLM são parte do design do agente.**
+
+Todos os casos viraram testes de regressão. Nenhum teste escrito "de cabeça" teria pegado algum deles: só apareceram quando modelos reais conversaram com o sistema.
+
+> **Depois das correções (v0.2):** _[resultados da nova rodada]_
 
 ## 6. Sem framework, de propósito
 
@@ -100,7 +108,7 @@ O loop do agente tem cerca de 100 linhas: chama o modelo, executa as tool calls,
 - **Limite de passos** por turno, com uma mensagem de fallback adicionada ao histórico para a conversa continuar válida.
 - **JSON malformado** nos argumentos é comum em modelos menores. O parse tolerante devolve o erro como observação, e o modelo geralmente se corrige no passo seguinte.
 - **Validação de schema antes da execução** (tipos, enums, `additionalProperties: false`). Em Python, `True` passa num `isinstance(x, int)`; um bug desses vira um pedido de "True pizzas".
-- **Testes sem LLM:** um `ScriptedLLM` reproduz sequências de tool calls, e o CI roda 63 testes em menos de um segundo, sem chave de API.
+- **Testes sem LLM:** um `ScriptedLLM` reproduz sequências de tool calls, e o CI roda 82 testes em menos de um segundo, sem chave de API.
 
 O cliente usa o protocolo de Chat Completions da OpenAI, então o mesmo código roda com OpenAI, Ollama local, Groq ou vLLM. Basta trocar a `base_url`.
 

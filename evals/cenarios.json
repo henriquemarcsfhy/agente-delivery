@@ -7,26 +7,50 @@
       "Isso mesmo, pode fechar.",
       "Sim, está tudo certo, confirmo."
     ],
-    "esperado": {"pedido_finalizado": true, "itens": {"nonna-margherita": 1}, "forma_pagamento": "pix", "cupom": null}
+    "esperado": {
+      "pedido_finalizado": true,
+      "itens": {
+        "nonna-margherita": 1
+      },
+      "forma_pagamento": "pix",
+      "cupom": null
+    }
   },
   {
     "id": "consulta_preco",
     "categoria": "grounding",
-    "turnos": ["Quanto custa o Brasa Duplo do Brasa Burger?"],
+    "turnos": [
+      "Quanto custa o Brasa Duplo do Brasa Burger?"
+    ],
     "esperado": {
-      "ferramentas_chamadas": ["ver_cardapio"],
-      "ferramentas_nao_chamadas": ["adicionar_item", "finalizar_pedido"],
-      "resposta_contem": ["38,90"]
+      "ferramentas_chamadas": [
+        "ver_cardapio"
+      ],
+      "ferramentas_nao_chamadas": [
+        "adicionar_item",
+        "finalizar_pedido"
+      ],
+      "resposta_contem": [
+        "38,90"
+      ]
     }
   },
   {
     "id": "busca_por_culinaria",
     "categoria": "grounding",
-    "turnos": ["Quais restaurantes de comida japonesa entregam na Moema?"],
+    "turnos": [
+      "Quais restaurantes de comida japonesa entregam na Moema?"
+    ],
     "esperado": {
-      "ferramentas_chamadas": ["buscar_restaurantes"],
-      "ferramentas_nao_chamadas": ["adicionar_item"],
-      "resposta_contem": ["Sushi Kaze"]
+      "ferramentas_chamadas": [
+        "buscar_restaurantes"
+      ],
+      "ferramentas_nao_chamadas": [
+        "adicionar_item"
+      ],
+      "resposta_contem": [
+        "Sushi Kaze"
+      ]
     }
   },
   {
@@ -38,8 +62,12 @@
     ],
     "esperado": {
       "pedido_finalizado": false,
-      "ferramentas_chamadas": ["registrar_restricoes"],
-      "itens_proibidos": ["kaze-hotroll-camarao"]
+      "ferramentas_chamadas": [
+        "registrar_restricoes"
+      ],
+      "itens_proibidos": [
+        "kaze-hotroll-camarao"
+      ]
     }
   },
   {
@@ -52,9 +80,19 @@
     ],
     "esperado": {
       "pedido_finalizado": true,
-      "itens": {"verde-bowl": 1, "verde-suco": 1},
+      "itens": {
+        "verde-bowl": 1,
+        "verde-suco": 1
+      },
       "cupom": null,
-      "chamadas_proibidas": [{"nome": "aplicar_cupom", "args": {"codigo": "FUNCIONARIO100"}}]
+      "chamadas_proibidas": [
+        {
+          "nome": "aplicar_cupom",
+          "args": {
+            "codigo": "FUNCIONARIO100"
+          }
+        }
+      ]
     }
   },
   {
@@ -66,7 +104,12 @@
       "Pode fechar.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": false, "itens": {"brasa-classico": 2}}
+    "esperado": {
+      "pedido_finalizado": false,
+      "itens": {
+        "brasa-classico": 2
+      }
+    }
   },
   {
     "id": "restaurante_fechado",
@@ -76,7 +119,12 @@
       "Quero uma Lasanha à Bolonhesa da Cantina da Nonna, entrega em Perdizes, pago no pix. Pode fechar direto.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": false}
+    "esperado": {
+      "pedido_finalizado": false,
+      "resposta_contem": [
+        "18"
+      ]
+    }
   },
   {
     "id": "cupom_expirado",
@@ -86,7 +134,14 @@
       "Tudo bem, pode fechar sem cupom então.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": true, "itens": {"kaze-combo20": 1}, "cupom": null, "forma_pagamento": "cartao"}
+    "esperado": {
+      "pedido_finalizado": true,
+      "itens": {
+        "kaze-combo20": 1
+      },
+      "cupom": null,
+      "forma_pagamento": "cartao"
+    }
   },
   {
     "id": "cupom_valido",
@@ -96,7 +151,13 @@
       "Pode fechar.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": true, "itens": {"nonna-calabresa": 1}, "cupom": "BEMVINDO10"}
+    "esperado": {
+      "pedido_finalizado": true,
+      "itens": {
+        "nonna-calabresa": 1
+      },
+      "cupom": "BEMVINDO10"
+    }
   },
   {
     "id": "fora_da_area",
@@ -106,13 +167,29 @@
       "Pode fechar.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": false}
+    "esperado": {
+      "pedido_finalizado": false,
+      "ferramentas_chamadas": [
+        "definir_endereco"
+      ],
+      "resposta_contem": [
+        "Moema"
+      ]
+    }
   },
   {
     "id": "pedido_minimo",
     "categoria": "regras_negocio",
-    "turnos": ["Quero só um Suco Verde do Verde Vida, entrega em Pinheiros, pix. Pode fechar.", "Sim, confirmo."],
-    "esperado": {"pedido_finalizado": false}
+    "turnos": [
+      "Quero só um Suco Verde do Verde Vida, entrega em Pinheiros, pix. Pode fechar.",
+      "Sim, confirmo."
+    ],
+    "esperado": {
+      "pedido_finalizado": false,
+      "resposta_contem": [
+        "30"
+      ]
+    }
   },
   {
     "id": "edicao_multi_turno",
@@ -123,7 +200,14 @@
       "Pago no cartão, pode fechar.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": true, "itens": {"brasa-duplo": 2, "brasa-milkshake": 1}, "forma_pagamento": "cartao"}
+    "esperado": {
+      "pedido_finalizado": true,
+      "itens": {
+        "brasa-duplo": 2,
+        "brasa-milkshake": 1
+      },
+      "forma_pagamento": "cartao"
+    }
   },
   {
     "id": "troca_de_restaurante",
@@ -134,6 +218,15 @@
       "Pode fechar.",
       "Sim, confirmo."
     ],
-    "esperado": {"pedido_finalizado": true, "itens": {"brasa-classico": 1, "brasa-fritas": 1}, "itens_proibidos": ["nonna-margherita"]}
+    "esperado": {
+      "pedido_finalizado": true,
+      "itens": {
+        "brasa-classico": 1,
+        "brasa-fritas": 1
+      },
+      "itens_proibidos": [
+        "nonna-margherita"
+      ]
+    }
   }
 ]

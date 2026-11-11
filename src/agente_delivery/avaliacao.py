@@ -18,6 +18,9 @@ from .catalog import Catalogo, normalizar
 from .llm import LLMClient
 from .tools import FUSO, DeliveryTools, EstadoSessao
 
+# Erros que não dizem nada sobre o modelo: limite de taxa, rede, timeout, falha do servidor.
+ERROS_DE_INFRA = {"RateLimitError", "APIConnectionError", "APITimeoutError", "InternalServerError"}
+
 
 @dataclass
 class ResultadoCenario:
@@ -32,6 +35,7 @@ class ResultadoCenario:
     latencia_s: float
     resposta_final: str
     erro_execucao: str | None = None
+    erro_infra: bool = False
     chamadas: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -49,7 +53,7 @@ def _args_contem(args: dict[str, Any] | None, esperado: dict[str, Any]) -> bool:
 
 
 def checar(
-    cenario: dict[str, Any], tools: DeliveryTools, chamadas: list[dict[str, Any]], texto_final: str
+    cenario: dict[str, Any], tools: DeliveryTools, chamadas: list[dict[str, Any]], textos: list[str]
 ) -> dict[str, bool]:
     esperado = cenario["esperado"]
     estado = tools.estado
@@ -84,8 +88,11 @@ def checar(
         no_carrinho = item in estado.carrinho
         no_pedido = bool(pedido) and any(i["item_id"] == item for i in pedido["itens"])
         r[f"sem_item:{item}"] = not (no_carrinho or no_pedido)
+    # Procura em todas as respostas do agente no cenário, não só na última:
+    # o agente pode explicar o problema num turno e só confirmar no seguinte.
+    tudo = normalizar(" ".join(textos))
     for trecho in esperado.get("resposta_contem", []):
-        r[f"resposta_contem:{trecho}"] = normalizar(trecho) in normalizar(texto_final)
+        r[f"resposta_contem:{trecho}"] = normalizar(trecho) in tudo
     return r
 
 
@@ -96,6 +103,7 @@ def rodar_cenario(cenario: dict[str, Any], llm: LLMClient, catalogo: Catalogo, m
     agente = Agent(llm=llm, tools=tools, confirmar=lambda *_: confirma, max_passos=max_passos)
 
     chamadas: list[dict[str, Any]] = []
+    textos: list[str] = []
     passos = 0
     texto_final = ""
     erro = None
@@ -106,11 +114,15 @@ def rodar_cenario(cenario: dict[str, Any], llm: LLMClient, catalogo: Catalogo, m
             chamadas.extend(resp.chamadas)
             passos += resp.passos
             texto_final = resp.texto
+            textos.append(resp.texto)
     except Exception as e:  # falha de API, timeout etc. conta como falha do cenário
         erro = f"{type(e).__name__}: {e}"
+        erro_infra = type(e).__name__ in ERROS_DE_INFRA
+    else:
+        erro_infra = False
     latencia = time.perf_counter() - inicio
 
-    checagens = checar(cenario, tools, chamadas, texto_final) if erro is None else {}
+    checagens = checar(cenario, tools, chamadas, textos) if erro is None else {}
     return ResultadoCenario(
         id=cenario["id"],
         sucesso=erro is None and all(checagens.values()),
@@ -123,5 +135,6 @@ def rodar_cenario(cenario: dict[str, Any], llm: LLMClient, catalogo: Catalogo, m
         latencia_s=round(latencia, 2),
         resposta_final=texto_final,
         erro_execucao=erro,
+        erro_infra=erro_infra,
         chamadas=chamadas,
     )

@@ -73,6 +73,12 @@ class EstadoSessao:
 
 
 def _fn(nome: str, descricao: str, propriedades: dict, obrigatorios: list[str] | None = None) -> dict:
+    obrigatorios = obrigatorios or []
+    # Parâmetros opcionais aceitam null: modelos (ex.: gpt-oss-120b) mandam null em vez de omitir,
+    # e provedores que validam o schema no servidor (Groq) rejeitam a chamada inteira com HTTP 400.
+    for chave, spec in propriedades.items():
+        if chave not in obrigatorios:
+            spec["type"] = [spec["type"], "null"]
     return {
         "type": "function",
         "function": {
@@ -81,7 +87,7 @@ def _fn(nome: str, descricao: str, propriedades: dict, obrigatorios: list[str] |
             "parameters": {
                 "type": "object",
                 "properties": propriedades,
-                "required": obrigatorios or [],
+                "required": obrigatorios,
                 "additionalProperties": False,
             },
         },
@@ -154,8 +160,16 @@ TOOL_SCHEMAS: list[dict] = [
 _TIPOS_JSON = {"string": str, "integer": int, "boolean": bool, "array": list, "object": dict}
 
 
-def validar_argumentos(nome: str, args: dict[str, Any]) -> None:
-    """Valida argumentos contra o JSON Schema simplificado da ferramenta."""
+def _tipo_principal(spec: dict) -> str:
+    tipo = spec["type"]
+    return next(t for t in tipo if t != "null") if isinstance(tipo, list) else tipo
+
+
+def validar_argumentos(nome: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Valida argumentos contra o JSON Schema simplificado e devolve os argumentos normalizados.
+
+    `null` em parâmetro opcional é tratado como ausente.
+    """
     schema = next((s["function"]["parameters"] for s in TOOL_SCHEMAS if s["function"]["name"] == nome), None)
     if schema is None:
         raise ToolError(f"Ferramenta desconhecida: {nome}")
@@ -163,18 +177,20 @@ def validar_argumentos(nome: str, args: dict[str, Any]) -> None:
     extras = set(args) - set(props)
     if extras:
         raise ToolError(f"Argumentos não suportados em {nome}: {sorted(extras)}")
-    faltando = [p for p in schema["required"] if p not in args]
+    args = {k: v for k, v in args.items() if not (v is None and k not in schema["required"])}
+    faltando = [p for p in schema["required"] if args.get(p) is None]
     if faltando:
         raise ToolError(f"Argumentos obrigatórios ausentes em {nome}: {faltando}")
     for chave, valor in args.items():
         spec = props[chave]
-        tipo = _TIPOS_JSON[spec["type"]]
+        tipo_json = _tipo_principal(spec)
+        tipo = _TIPOS_JSON[tipo_json]
         # bool é subclasse de int em Python; não aceite True como quantidade.
         if not isinstance(valor, tipo) or (tipo is int and isinstance(valor, bool)):
-            raise ToolError(f"'{chave}' deve ser do tipo {spec['type']}")
+            raise ToolError(f"'{chave}' deve ser do tipo {tipo_json}")
         if "enum" in spec and valor not in spec["enum"]:
             raise ToolError(f"'{chave}' deve ser um de {spec['enum']}")
-        if spec["type"] == "array" and "enum" in spec.get("items", {}):
+        if tipo_json == "array" and "enum" in spec.get("items", {}):
             invalidos = [v for v in valor if v not in spec["items"]["enum"]]
             if invalidos:
                 raise ToolError(f"Valores inválidos em '{chave}': {invalidos}. Use: {spec['items']['enum']}")
@@ -182,6 +198,7 @@ def validar_argumentos(nome: str, args: dict[str, Any]) -> None:
             raise ToolError(f"'{chave}' deve ser >= {spec['minimum']}")
         if "maximum" in spec and valor > spec["maximum"]:
             raise ToolError(f"'{chave}' deve ser <= {spec['maximum']}")
+    return args
 
 
 class DeliveryTools:
@@ -192,8 +209,7 @@ class DeliveryTools:
     # ---------- despacho ----------
 
     def executar(self, nome: str, args: dict[str, Any]) -> dict[str, Any]:
-        validar_argumentos(nome, args)
-        return getattr(self, nome)(**args)
+        return getattr(self, nome)(**validar_argumentos(nome, args))
 
     # ---------- consulta ----------
 
@@ -204,10 +220,12 @@ class DeliveryTools:
         termos = _termos_de_busca(busca)
         resultados = []
         fechados_que_combinam = []
+        nao_entregam_no_bairro = []
         for r in self.catalogo.restaurantes.values():
             if termos and not any(t in _texto_pesquisavel(r) for t in termos):
                 continue
             if bairro and not r.entrega_em(bairro):
+                nao_entregam_no_bairro.append(r.nome)
                 continue
             aberto = r.aberto_em(self.estado.agora)
             if apenas_abertos and not aberto:
@@ -226,9 +244,11 @@ class DeliveryTools:
             )
         resposta: dict[str, Any] = {"restaurantes": resultados, "total": len(resultados)}
         if not resultados:
-            # Resultado vazio sem contexto faz o modelo desistir; diga o que existe.
+            # Resultado vazio sem contexto faz o modelo desistir ou dizer ao cliente que o
+            # restaurante "não existe". Explique por que cada candidato ficou de fora.
             resposta["dica"] = {
                 "fechados_agora_que_combinam": fechados_que_combinam,
+                "combinam_mas_nao_entregam_no_bairro": nao_entregam_no_bairro,
                 "culinarias_disponiveis": sorted({r.culinaria for r in self.catalogo.restaurantes.values()}),
                 "restaurantes_existentes": sorted(r.nome for r in self.catalogo.restaurantes.values()),
             }

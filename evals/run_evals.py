@@ -46,15 +46,21 @@ def main() -> None:
             r = rodar_cenario(c, llm, catalogo)
             resultados.append({"categoria": c.get("categoria", "-"), "rodada": rodada, **asdict(r)})
             falhas = [k for k, v in r.checagens.items() if not v]
-            status = "OK " if r.sucesso else "FALHOU"
+            status = "OK " if r.sucesso else ("INFRA" if r.erro_infra else "FALHOU")
             print(
                 f"[{status}] {c['id']} #{rodada + 1}  {r.erro_execucao or ''}{' falhas=' + str(falhas) if falhas else ''}"
             )
 
     n = len(resultados)
     sucesso = sum(r["sucesso"] for r in resultados) / n
+    validos = [r for r in resultados if not r["erro_infra"]]
+    sucesso_validos = sum(r["sucesso"] for r in validos) / len(validos) if validos else 0.0
     print(f"\n## Resultados: `{a.model}` ({len(cenarios)} cenários x {a.repeticoes} rodadas)\n")
     print(f"- Taxa de sucesso: **{sucesso:.0%}**")
+    print(
+        f"- Taxa de sucesso sem erros de infraestrutura: **{sucesso_validos:.0%}** "
+        f"({n - len(validos)} rodada(s) perdida(s) por limite de taxa, rede ou timeout)"
+    )
     print(
         f"- Chamadas de ferramenta por cenário (mediana): {statistics.median(r['chamadas_ferramenta'] for r in resultados)}"
     )
@@ -65,7 +71,7 @@ def main() -> None:
     print(f"- Latência por cenário (mediana): {statistics.median(r['latencia_s'] for r in resultados):.1f}s\n")
 
     por_cat: dict[str, list[bool]] = defaultdict(list)
-    for r in resultados:
+    for r in validos:
         por_cat[r["categoria"]].append(r["sucesso"])
     print("| Categoria | Sucesso |\n|---|---|")
     for cat, vals in sorted(por_cat.items()):
@@ -76,7 +82,14 @@ def main() -> None:
     nome = f"{a.model.replace('/', '_').replace(':', '_')}_{datetime.now():%Y%m%d_%H%M}.json"
     (saida / nome).write_text(
         json.dumps(
-            {"modelo": a.model, "taxa_sucesso": sucesso, "resultados": resultados}, ensure_ascii=False, indent=2
+            {
+                "modelo": a.model,
+                "taxa_sucesso": sucesso,
+                "taxa_sucesso_sem_infra": sucesso_validos,
+                "resultados": resultados,
+            },
+            ensure_ascii=False,
+            indent=2,
         ),
         "utf-8",
     )

@@ -61,7 +61,7 @@ git clone https://github.com/henriquemarcsfhy/agente-delivery && cd agente-deliv
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest -q                     # 63 testes, sem LLM
+pytest -q                     # 82 testes, sem LLM
 
 # Chat com OpenAI
 export LLM_API_KEY=sk-...
@@ -105,27 +105,40 @@ python evals/run_evals.py --base-url http://localhost:11434/v1 --model qwen2.5:7
 
 O runner mede taxa de sucesso por categoria, chamadas de ferramenta, erros de ferramenta, tokens e latência, e salva o detalhe de cada rodada em `evals/resultados/`.
 
-O próprio harness também é testado ([`tests/test_avaliacao.py`](tests/test_avaliacao.py)): um agente "perfeito" roteirizado passa, e agentes que obedecem à injeção ou ignoram a alergia **falham**.
+O próprio harness também é testado ([`tests/test_avaliacao.py`](tests/test_avaliacao.py)): um agente "perfeito" roteirizado passa; agentes que obedecem à injeção ou ignoram a alergia **falham**; e um agente nulo, que só responde "ok", precisa **falhar em todos os cenários**.
 
 ### Resultados
 
-<!-- Rode os comandos acima e cole aqui a tabela que o runner imprime. -->
+Todos os modelos rodaram no plano gratuito do Groq, com temperatura 0.
 
-| Versão | Modelo (Groq) | Rodadas | Sucesso geral | Prompt injection | Segurança alimentar | Regras de negócio | Tokens/cenário (mediana) |
+| Versão | Modelo | Rodadas | Sucesso | Falhas do modelo | Falhas do sistema/infra | Tokens/cenário | Latência/cenário |
 |---|---|---|---|---|---|---|---|
-| v0.1 | `openai/gpt-oss-20b` | 1 | 77% (10/13) | 1/1 | 0/1 | 3/4 | 15.5k |
+| v0.1 | `openai/gpt-oss-20b` | 1 | 77% (10/13) | 0 | 3 (bugs 1 e 2) | 15.5k | 69 s |
+| v0.1 | `openai/gpt-oss-120b` | 1 | 92% (12/13) | 0 | 1 (bug 3) | 16.1k | 59 s |
+| v0.1 | `qwen/qwen3.8-27b` | 1 | 92% (12/13) | 0 | 1 (limite diário de tokens) | 17.7k | 147 s |
 | v0.2 | _a preencher_ | | | | | | |
+
+> Na v0.2 os cenários ficaram **mais rígidos** (ver bug 4), então os números da v0.2 não são diretamente comparáveis aos da v0.1: são mais conservadores.
 
 Os detalhes de cada rodada (tool calls, argumentos e resposta final) ficam em [`evals/resultados/`](evals/resultados/).
 
 ### O que a avaliação encontrou (v0.1 → v0.2)
 
-A primeira rodada com um modelo real falhou em 3 dos 13 cenários. Nenhuma falha era o modelo "não sabendo" a tarefa: eram problemas do **sistema em volta do modelo**.
+Na v0.1, **nenhuma das 5 falhas foi o modelo "não sabendo" a tarefa**: todas eram problemas do sistema em volta do modelo, incluindo a própria avaliação.
 
-1. **Ferramenta de busca frágil.** O cliente pediu "Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas a culinária cadastrada é "japonesa". A busca voltou vazia, e o modelo concluiu que não havia sushi no bairro. **Correção:** a busca agora aceita culinária, prato, nome do restaurante e sinônimos, e um resultado vazio traz uma `dica` com o que existe (culinárias, restaurantes e quem está fechado agora). Lição: resultado vazio sem contexto leva o modelo a desistir.
-2. **Tool call rejeitada pelo provedor.** O gpt-oss-20b às vezes gera uma tool call malformada: vaza um token interno no nome (`buscar_restaurantes<|channel|>commentary`) ou inventa argumentos para `ver_carrinho`. O Groq valida isso no servidor e responde **HTTP 400**, sem devolver a chamada, e o agente quebrava. **Correção:** o cliente converte esse 400 em `ToolCallRejectedError`, e o loop reenvia a requisição com um aviso de correção transitório (que não entra no histórico), até 2 vezes por passo. Se mesmo assim falhar, responde com uma mensagem de fallback em vez de lançar exceção. O runner agora conta essas rejeições.
+1. **Ferramenta de busca frágil** (gpt-oss-20b). O cliente pediu "Combo 20 peças do Sushi Kaze". O modelo chamou `buscar_restaurantes(culinaria="sushi")`, mas a culinária cadastrada é "japonesa". A busca voltou vazia e o modelo concluiu que não havia sushi no bairro. **Correção:** a busca aceita culinária, prato, nome do restaurante e sinônimos.
+2. **Tool call rejeitada pelo provedor** (gpt-oss-20b). O modelo às vezes gera uma tool call malformada: vaza um token interno no nome (`buscar_restaurantes<|channel|>commentary`) ou inventa argumentos para `ver_carrinho`. O Groq valida isso no servidor e responde **HTTP 400** sem devolver a chamada, e o agente quebrava. **Correção:** o cliente converte esse 400 em `ToolCallRejectedError`, e o loop reenvia a requisição com um aviso de correção transitório (que não entra no histórico), até 2 vezes por passo. Se ainda falhar, o agente responde com fallback em vez de lançar exceção.
+3. **`null` em parâmetro opcional** (gpt-oss-120b). O modelo mandou `{"culinaria": null, "bairro": null}` em vez de omitir os campos. O schema dizia `"type": "string"`, então o Groq rejeitou com 400. **Correção:** parâmetros opcionais são declarados como `["string", "null"]`, e a validação trata `null` como ausente.
+4. **Cenários que um agente nulo passava** (a própria avaliação). Um agente que só responde "ok" passava em 3 dos 13 cenários, porque os casos de "pedido não pode ser fechado" só checavam que nada foi enviado. Ao endurecê-los (o agente precisa explicar o motivo: horário, área, pedido mínimo), apareceu um problema escondido: nos cenários de restaurante fechado e fora da área, o gpt-oss **disse ao cliente que o restaurante não existia**. A busca filtrava esses restaurantes em silêncio. **Correção:** resultados vazios trazem uma `dica` explicando o que combinou, mas está fechado ou não entrega no bairro. Agora há um teste que exige que o agente nulo **falhe em todos os cenários**.
+5. **Erro de infraestrutura contado como falha do modelo** (qwen3.8-27b). O qwen fechou o pedido corretamente e só caiu no último turno por limite diário de tokens (HTTP 429). **Correção:** o runner separa erros de infraestrutura (limite de taxa, rede, timeout) e reporta a taxa de sucesso com e sem eles. Limites por minuto são tratados com retry automático.
 
-Os dois casos viraram testes de regressão ([`test_tools.py`](tests/test_tools.py), [`test_agent.py`](tests/test_agent.py)).
+Todos os casos viraram testes de regressão ([`test_tools.py`](tests/test_tools.py), [`test_agent.py`](tests/test_agent.py), [`test_avaliacao.py`](tests/test_avaliacao.py)).
+
+Observações sobre os modelos:
+
+- **Mensagens de erro escritas para o LLM funcionam.** O qwen chamou `ver_cardapio("cantina_da_nonna")`. O erro listou os IDs válidos, e ele se corrigiu para `cantina-nonna` na chamada seguinte, sem intervenção.
+- **Nenhum modelo obedeceu à injeção de prompt** no cardápio, mas a arquitetura não depende disso: o cupom é validado em código, e o pedido só é enviado com a confirmação humana.
+- **O plano gratuito limita o volume:** 13 cenários com o qwen consumiram ~205 mil tokens, acima do limite diário de 200 mil desse modelo. Boa parte do custo vem do system prompt e dos schemas, reenviados a cada passo.
 
 ## Decisões e trade-offs
 
@@ -140,6 +153,7 @@ Os dois casos viraram testes de regressão ([`test_tools.py`](tests/test_tools.p
 - [ ] Simulador de usuário com LLM para avaliação com mais variação
 - [ ] Interface web (Streamlit/Gradio) e deploy em Hugging Face Spaces
 - [ ] Comparativo de modelos abertos vs. proprietários na tabela de resultados
+- [ ] Reduzir tokens por passo (schemas compactos, cache de prompt)
 
 ## Estrutura
 
@@ -153,7 +167,7 @@ src/agente_delivery/
   prompts.py      # system prompt
   chat.py         # CLI
 evals/            # cenários e runner
-tests/            # 63 testes (pytest)
+tests/            # 82 testes (pytest)
 docs/artigo.md    # artigo técnico sobre o projeto
 ```
 

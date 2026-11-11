@@ -9,7 +9,11 @@ description = "Agente de pedidos de delivery com LLM, function calling, guardrai
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["openai>=1.40"]
+dependencies = [
+    "openai>=1.40",
+    # Windows não traz o banco de fusos IANA; sem isso ZoneInfo("America/Sao_Paulo") falha.
+    "tzdata; sys_platform == 'win32'",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

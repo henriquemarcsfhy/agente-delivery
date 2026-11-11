@@ -65,6 +65,7 @@ class OpenAICompatibleClient:
         api_key: str | None = None,
         temperature: float = 0.0,
         timeout: float = 60.0,
+        max_retries: int = 8,
     ):
         from openai import OpenAI  # import tardio: testes não precisam do SDK
 
@@ -74,6 +75,9 @@ class OpenAICompatibleClient:
             base_url=base_url or os.environ.get("LLM_BASE_URL") or None,
             api_key=api_key or os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY") or "nao-usado",
             timeout=timeout,
+            # Planos gratuitos (Groq, Gemini) limitam requisições por minuto; o SDK
+            # respeita o Retry-After e tenta de novo em vez de falhar o cenário.
+            max_retries=max_retries,
         )
 
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> LLMResponse:
